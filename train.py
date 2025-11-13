@@ -76,7 +76,8 @@ if __name__=="__main__":
         args.batch_token,
         args.gradient_accumulation_steps
     )
-
+    batch_size = batch_size/avg_length
+    
     train_dataset = TextDataset(src_train, trg_train)
     train_loader = get_data_loader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
