@@ -17,6 +17,12 @@ parser.add_argument("--test_source", default='./datasets_small/test.100.en')
 parser.add_argument("--test_target", default='./datasets_small/test.100.de')
 parser.add_argument("--val_source", default='./datasets_small/valid.100.en')
 parser.add_argument("--val_target", default='./datasets_small/valid.100.de')
+parser.add_argument("--tokenized_train_source", required=True)
+parser.add_argument("--tokenized_train_target", required=True)
+parser.add_argument("--tokenized_test_source", required=True)
+parser.add_argument("--tokenized_test_target", required=True)
+parser.add_argument("--tokenized_val_source", required=True)
+parser.add_argument("--tokenized_val_target", required=True)
 
 # data info and arg
 parser.add_argument("--src_vocab", type=int, default=37256)
@@ -56,9 +62,9 @@ if __name__=="__main__":
     tokenizer = load_tokenizer(args.tokenizer_path)
 
     # prepare data
-    src_train, trg_train, avg_length = load_data(args.train_source, args.train_target, tokenizer, args.max_length)
-    src_test, trg_test, _ = load_data(args.test_source, args.test_target, tokenizer, args.max_length)
-    src_val, trg_val, _ = load_data(args.val_source, args.val_target, tokenizer, args.max_length)
+    src_train, trg_train, avg_length = load_data(args.train_source, args.train_target, tokenizer, args.max_length, source_file=args.tokenized_train_source, target_file=args.tokenized_train_target)
+    src_test, trg_test, _ = load_data(args.test_source, args.test_target, tokenizer, args.max_length, source_file=args.tokenized_test_source, target_file=args.tokenized_test_target)
+    src_val, trg_val, _ = load_data(args.val_source, args.val_target, tokenizer, args.max_length, source_file=args.tokenized_val_source, target_file=args.tokenized_val_target)
 
     batch_size = max(1, args.batch_token // int(avg_length)) # calculate batch size
     if args.max_batch_size:

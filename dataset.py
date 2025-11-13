@@ -3,47 +3,81 @@ import torch.utils.data as data
 import torch.nn as nn
 from tqdm import tqdm
 from minbpe import BasicTokenizer
+import os
+import pickle
 
 # tokens
 PAD = 0
 SOS = 1
 EOS = 2
 
-def load_data(src_data_path, trg_data_path, tokenizer, max_length=180):
+def load_data(src_data_path, trg_data_path, tokenizer, max_length, source_file, target_file):
     print("loading data...")
-    avg_length = 0
-    count = 0
-    filtered_count = 0
-    with open(src_data_path, 'r', encoding='utf-8') as sf,\
-         open(trg_data_path, 'r', encoding='utf-8') as tf:
-        src_lines = sf.readlines()
-        trg_lines = tf.readlines()
 
-        src_sentences = []
-        trg_sentences = []
+    # check if tokenized file exist
+    if os.path.exists(source_file) and os.path.exists(target_file):
+        print(f"Loading data from tokenized data from {source_file} and {target_file}")
+        # load tokenized content
+        with open(source_file, 'rb') as sf:
+            src_content = pickle.load(sf)
+        with open(target_file, 'rb') as tf:
+            trg_content = pickle.load(tf)
 
-        for src_line, trg_line in tqdm(zip(src_lines, trg_lines), total=len(src_lines)):
-            if len(src_line) > 5 and len(trg_line) > 5:
-                src_tokens = tokenizer.encode(src_line.strip())
-                trg_tokens = tokenizer.encode(trg_line.strip())
+        return src_content['src_sentences'], trg_content['trg_sentences'], src_content['avg_length']
+    else:
+        avg_length = 0
+        count = 0
+        filtered_count = 0
+        with open(src_data_path, 'r', encoding='utf-8') as sf,\
+            open(trg_data_path, 'r', encoding='utf-8') as tf:
+            src_lines = sf.readlines()
+            trg_lines = tf.readlines()
 
-                # Filter out sequences that are too long
-                if len(src_tokens) <= max_length and len(trg_tokens) <= max_length:
-                    avg_length += len(src_tokens)
-                    avg_length += len(trg_tokens)
+            src_sentences = []
+            trg_sentences = []
 
-                    src_sentences.append(src_tokens)
-                    trg_sentences.append(trg_tokens)
-                    count += 2
-                else:
-                    filtered_count += 1
-                
-        avg_length /= count
-        print("total sentence pairs: ", count/2)
-        print("average length: ", avg_length)
-        if filtered_count > 0:
-            print(f"filtered out {filtered_count} sentences longer than {max_length} tokens")
-        return src_sentences, trg_sentences, avg_length
+            print("Loading and filtering data...")
+            for src_line, trg_line in tqdm(zip(src_lines, trg_lines), total=len(src_lines)):
+                if len(src_line) > 5 and len(trg_line) > 5:
+                    src_tokens = tokenizer.encode(src_line.strip())
+                    trg_tokens = tokenizer.encode(trg_line.strip())
+
+                    # Filter out sequences that are too long
+                    if len(src_tokens) <= max_length and len(trg_tokens) <= max_length:
+                        avg_length += len(src_tokens)
+                        avg_length += len(trg_tokens)
+
+                        src_sentences.append(src_tokens)
+                        trg_sentences.append(trg_tokens)
+                        count += 2
+                    else:
+                        filtered_count += 1
+                    
+            avg_length /= count
+            print("total sentence pairs: ", count/2)
+            print("average length: ", avg_length)
+            if filtered_count > 0:
+                print(f"filtered out {filtered_count} sentences longer than {max_length} tokens")
+
+            # save tokenized files
+            src_content = {
+                'src_sentences': src_sentences,
+                'avg_length': avg_length
+            }
+            trg_content = {
+                'trg_sentences':trg_sentences,
+                'avg_length': avg_length
+            }
+
+            os.makedirs(os.path.dirname(source_file), exist_ok=True)
+            os.makedirs(os.path.dirname(target_file), exist_ok=True)
+
+            with open(source_file, 'wb') as sf:
+                pickle.dump(src_content, sf)
+            with open(target_file, 'wb') as tf:
+                pickle.dump(trg_content, tf)
+
+            return src_sentences, trg_sentences, avg_length
 
 def load_tokenizer(file_path):
     tokenizer = BasicTokenizer()
