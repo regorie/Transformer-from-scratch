@@ -21,6 +21,9 @@ class LRScheduler:
     
     def _get_lr(self):
         """Calculate learning rate according to the formula"""
+        if self.step_num == 0:
+            return 0.0  # Return 0 learning rate for step 0
+        
         arg1 = self.step_num ** (-0.5)
         arg2 = self.step_num * (self.warmup_steps ** (-1.5))
         return (self.embed_dim ** (-0.5)) * min(arg1, arg2)

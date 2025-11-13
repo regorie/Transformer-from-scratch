@@ -55,8 +55,8 @@ parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
 
 args = parser.parse_args()
 
-#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-device = torch.device('mps')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#device = torch.device('mps')
 
 def calculate_efficient_batch_size(effective_batch_token, gradient_accumulation_steps):
     actual_batch_token = effective_batch_token // gradient_accumulation_steps
@@ -76,8 +76,8 @@ if __name__=="__main__":
         args.batch_token,
         args.gradient_accumulation_steps
     )
-    batch_size = batch_size/avg_length
-    
+    batch_size = int(batch_size//avg_length + 1)
+
     train_dataset = TextDataset(src_train, trg_train)
     train_loader = get_data_loader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
