@@ -1,0 +1,117 @@
+import torch
+import torch.optim as optim
+import torch.nn as nn
+from tqdm import tqdm
+import pickle
+
+from model import *
+from dataset import *
+from trainer import Trainer, LRScheduler
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--tokenizer_path", '-tk', default='./tokenizer/mymodel.model')
+parser.add_argument("--train_source", default='./datasets_small/train.10k.en')
+parser.add_argument("--train_target", default='./datasets_small/train.10k.de')
+parser.add_argument("--test_source", default='./datasets_small/test.100.en')
+parser.add_argument("--test_target", default='./datasets_small/test.100.de')
+parser.add_argument("--val_source", default='./datasets_small/valid.100.en')
+parser.add_argument("--val_target", default='./datasets_small/valid.100.de')
+
+# data info and arg
+parser.add_argument("--src_vocab", type=int, default=37256)
+parser.add_argument("--trg_vocab", type=int, default=37256)
+parser.add_argument("--max_length", type=int, default=100) # maximum length of sentences
+
+# args for model
+parser.add_argument("--encoder_layers", type=int, default=6)
+parser.add_argument("--decoder_layers", type=int, default=6)
+parser.add_argument("--embed_dim", type=int, default=512)
+parser.add_argument("--n_head", type=int, default=8)
+parser.add_argument("--d_k", type=int, default=64)
+parser.add_argument("--d_v", type=int, default=64)
+
+# args for training loop
+parser.add_argument("--epoch", '-ep', type=int, default=300)
+parser.add_argument("--max_steps", '-ms', type=int, default=100000) # max_steps are primary
+parser.add_argument("--batch_token", '-b', type=int, default=25000)
+parser.add_argument("--max_batch_size", type=int, default=None)
+#parser.add_argument("--learning_rate", '-lr', type=float, default=None)
+parser.add_argument("--lr_warmup", '-lrw', type=int, default=4000)
+parser.add_argument("--dropout", '-drop', type=float, default=0.1)
+parser.add_argument("--label_smoothing", default=0.1)
+parser.add_argument("--test_interval", default=1000)
+
+parser.add_argument("--output_file", default="./outputs/output")
+parser.add_argument("--checkpoint_dir", default="./checkpoints/")
+parser.add_argument("--max_checkpoint", default=5)
+
+args = parser.parse_args()
+
+#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps')
+
+if __name__=="__main__":
+    # load tokenizer
+    tokenizer = load_tokenizer(args.tokenizer_path)
+
+    # prepare data
+    src_train, trg_train, avg_length = load_data(args.train_source, args.train_target, tokenizer, args.max_length)
+    src_test, trg_test, _ = load_data(args.test_source, args.test_target, tokenizer, args.max_length)
+    src_val, trg_val, _ = load_data(args.val_source, args.val_target, tokenizer, args.max_length)
+
+    batch_size = max(1, args.batch_token // int(avg_length)) # calculate batch size
+    if args.max_batch_size:
+        batch_size = min(batch_size, args.max_batch_size)
+
+    train_dataset = TextDataset(src_train, trg_train)
+    train_loader = get_data_loader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+
+    test_dataset = TextDataset(src_test, trg_test)
+    val_dataset = TextDataset(src_val, trg_val)
+    test_loader = get_data_loader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    val_loader = get_data_loader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+
+    # prepare model
+    encoder_args = {'self_attention': {'d_k': args.d_k, 'd_v': args.d_v, 'n_head': args.n_head, 'max_length': args.max_length, 'mask': False},
+                    'dropout': args.dropout}
+    decoder_args = {'self_attention': {'d_k': args.d_k, 'd_v': args.d_v, 'n_head': args.n_head, 'max_length': args.max_length, 'mask': True},
+                    'attention': {'d_k': args.d_k, 'd_v': args.d_v, 'n_head': args.n_head, 'max_length': args.max_length, 'mask': False},
+                    'dropout': args.dropout}
+    
+    model = Transformer(args.encoder_layers, args.decoder_layers, args.embed_dim, args.src_vocab, args.trg_vocab, args.dropout,
+                 encoder_args, decoder_args)
+    model = model.to(device)
+
+    # prepare training and setup trainer
+    optimizer = optim.Adam(model.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9)
+    criterion = nn.CrossEntropyLoss(ignore_index=PAD, label_smoothing=args.label_smoothing)
+
+    scheduler = LRScheduler(optimizer, args.embed_dim, warmup_steps=args.lr_warmup)
+
+    trainer = Trainer(model, optimizer, criterion, scheduler, args.checkpoint_dir, args.max_checkpoint, device)
+
+    # train
+    trainer.train(epoch=args.epoch, max_steps=args.max_steps, data_loader=train_loader, val_loader=val_loader, 
+                  test_interval=args.test_interval)
+    print("Training complete...")
+
+    # final test
+    trainer.model.load_state_dict(trainer.best_model_state)
+    test_acc = trainer.evaluate(data_loader=test_loader)
+    print("Final test accuracy: ", test_acc)
+
+    # save
+    print("Save...")
+    logs_dict = vars(args)
+    save_content = {
+        'model_state_dict': trainer.best_model_state,
+        'val_loss_list': trainer.val_loss_list,
+        'train_loss_list': trainer.train_loss_list,
+        'final_test_acc': test_acc,
+    }
+    logs_dict.update(save_content)
+
+    pickle.dump(logs_dict, args.output_file)
+
+    print("Done")
