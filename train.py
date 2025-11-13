@@ -92,7 +92,7 @@ if __name__=="__main__":
     trainer = Trainer(model, optimizer, criterion, scheduler, args.checkpoint_dir, args.max_checkpoint, device)
 
     # train
-    trainer.train(epoch=args.epoch, max_steps=args.max_steps, data_loader=train_loader, val_loader=val_loader, 
+    trainer.train(epoch=args.epoch, max_steps=args.max_steps, train_loader=train_loader, val_loader=val_loader, 
                   test_interval=args.test_interval)
     print("Training complete...")
 

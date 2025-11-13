@@ -204,5 +204,3 @@ class MultiheadAttention(nn.Module):
         output = self.W_concat(output) # (batch_size, q_seq_len, embed_dim)
 
         return output
-
-

@@ -65,7 +65,7 @@ class Trainer():
                 target_input = target[:,:-1]
                 target_output = target[:, 1:]
 
-                self.optimzier.zero_grad()
+                self.optimizer.zero_grad()
                 # forward pass
                 output = self.model(source, target_input, mode='train')
 
