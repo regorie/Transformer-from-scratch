@@ -51,11 +51,16 @@ parser.add_argument("--test_interval", default=1000)
 parser.add_argument("--output_file", default="./outputs/output")
 parser.add_argument("--checkpoint_dir", default="./checkpoints/")
 parser.add_argument("--max_checkpoint", default=5)
+parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
 
 args = parser.parse_args()
 
 #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 device = torch.device('mps')
+
+def calculate_efficient_batch_size(effective_batch_token, gradient_accumulation_steps):
+    actual_batch_token = effective_batch_token // gradient_accumulation_steps
+    return actual_batch_token
 
 if __name__=="__main__":
     # load tokenizer
@@ -66,9 +71,11 @@ if __name__=="__main__":
     src_test, trg_test, _ = load_data(args.test_source, args.test_target, tokenizer, args.max_length, source_file=args.tokenized_test_source, target_file=args.tokenized_test_target)
     src_val, trg_val, _ = load_data(args.val_source, args.val_target, tokenizer, args.max_length, source_file=args.tokenized_val_source, target_file=args.tokenized_val_target)
 
-    batch_size = max(1, args.batch_token // int(avg_length)) # calculate batch size
-    if args.max_batch_size:
-        batch_size = min(batch_size, args.max_batch_size)
+        # calculate batch size
+    batch_size = calculate_efficient_batch_size(
+        args.batch_token,
+        args.gradient_accumulation_steps
+    )
 
     train_dataset = TextDataset(src_train, trg_train)
     train_loader = get_data_loader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -95,7 +102,7 @@ if __name__=="__main__":
 
     scheduler = LRScheduler(optimizer, args.embed_dim, warmup_steps=args.lr_warmup)
 
-    trainer = Trainer(model, optimizer, criterion, scheduler, args.checkpoint_dir, args.max_checkpoint, device)
+    trainer = Trainer(model, optimizer, criterion, scheduler, args.checkpoint_dir, args.max_checkpoint, device, gradient_accumulation_steps=args.gradient_accumulation_steps)
 
     # train
     trainer.train(epoch=args.epoch, max_steps=args.max_steps, train_loader=train_loader, val_loader=val_loader, 
@@ -104,7 +111,7 @@ if __name__=="__main__":
 
     # final test
     trainer.model.load_state_dict(trainer.best_model_state)
-    test_acc = trainer.evaluate(data_loader=test_loader)
+    test_acc = trainer.evaluate(test_loader)
     print("Final test accuracy: ", test_acc)
 
     # save
@@ -118,6 +125,7 @@ if __name__=="__main__":
     }
     logs_dict.update(save_content)
 
-    pickle.dump(logs_dict, args.output_file)
+    with open(args.output_file + '.pkl', 'wb') as f:
+        pickle.dump(logs_dict, f)
 
     print("Done")

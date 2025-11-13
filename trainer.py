@@ -31,7 +31,8 @@ class LRScheduler:
     
 
 class Trainer():
-    def __init__(self, model, optimizer, criterion, lr_scheduler, checkpoint_dir, max_checkpoint, device):
+    def __init__(self, model, optimizer, criterion, lr_scheduler, checkpoint_dir, max_checkpoint, device,
+                 gradient_accumulation_steps=1):
         self.model = model
         self.optimizer = optimizer
         self.criterion = criterion
@@ -46,6 +47,8 @@ class Trainer():
         self.train_loss_list = []
         self.checkpoint_files = deque(maxlen=max_checkpoint)
         self.max_checkpoint = max_checkpoint
+
+        self.gradient_accumulation_steps = gradient_accumulation_steps
         
         # Create checkpoint directory if it doesn't exist
         os.makedirs(checkpoint_dir, exist_ok=True)
@@ -53,58 +56,99 @@ class Trainer():
     def train(self, epoch, max_steps, train_loader, val_loader, test_interval):
         self.model.train()
         steps = 0
+        accumulation_step = 0
+        accumulated_loss = 0.0
 
         for ep in range(epoch):
             epoch_loss = 0.0
             self.val_loss_list.append([])
             self.train_loss_list.append([])
 
-            for batch in tqdm(train_loader, desc=f'Epoch {ep+1}'):
+            epoch_pbar = tqdm(train_loader, desc=f'Epoch {ep+1}/{epoch}')
+
+            for batch_idx, batch in enumerate(epoch_pbar):
                 source = batch['source'].to(self.device)
                 target = batch['target'].to(self.device)
                 target_input = target[:,:-1]
                 target_output = target[:, 1:]
 
-                self.optimizer.zero_grad()
                 # forward pass
                 output = self.model(source, target_input, mode='train')
 
                 # calculate loss
                 loss = self.criterion(output.reshape(-1, output.size(-1)), target_output.reshape(-1))
 
+                # scale loss by accumulation steps
+                scaled_loss = loss / self.gradient_accumulation_steps
+
                 # backward pass
-                loss.backward()
+                scaled_loss.backward()
 
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                self.optimzier.step()
-                self.lr_scheduler.step() # update learning rate
+                # accumulate loss for logging
+                accumulated_loss += scaled_loss.item()
+                accumulation_step += 1
 
-                epoch_loss += loss.item()
-
-                self.train_loss_list[-1].append(loss.item())
-
-                steps += 1
-                if max_steps < steps:
-                    print(f'Current step {steps} Loss: {loss.item():.4f}, LR: {self.lr_scheduler.get_last_lr()[0]:.6f}')
-                    curr_val_loss = self.evaluate(val_loader)
-                    self.val_loss_list[-1].append(curr_val_loss)
-                    if curr_val_loss <= self.best_val_loss:
-                        self.best_val_loss = curr_val_loss
-                        self.best_model_state = self.model.state_dict()
-                    self.save_checkpoint(ep, steps, curr_val_loss, curr_val_loss <= self.best_val_loss)
-                    return
-                
-                if steps % test_interval == 0:
-                    curr_val_loss = self.evaluate(val_loader)
-                    self.val_loss_list[-1].append(curr_val_loss)
+                # update weights only after accumulation_steps
+                if accumulation_step % self.gradient_accumulation_steps == 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                     
-                    is_best = curr_val_loss <= self.best_val_loss
-                    if is_best:
-                        self.best_val_loss = curr_val_loss
-                        self.best_model_state = self.model.state_dict()
+                    self.optimizer.step()
+                    self.lr_scheduler.step() # update learning rate
+                    self.optimizer.zero_grad()
 
-                    self.save_checkpoint(ep, steps, curr_val_loss, is_best)
-                    print(f'Step {steps} Loss: {loss.item():.4f}, Val Loss: {curr_val_loss:.4f}, LR: {self.lr_scheduler.get_last_lr()[0]:.6f}')
+                    steps += 1
+
+                    avg_accumulated_loss = accumulated_loss
+                    epoch_loss += avg_accumulated_loss
+                    self.train_loss_list[-1].append(avg_accumulated_loss)
+
+                    epoch_pbar.set_postfix({
+                        'Loss': f'{avg_accumulated_loss:.4f}',
+                        'LR': f'{self.lr_scheduler.get_last_lr()[0]:.6f}',
+                        'Step': steps,
+                        'AccumStep': f'{accumulation_step % self.gradient_accumulation_steps}/{self.gradient_accumulation_steps}'
+                    })
+
+                    accumulated_loss = 0.0
+
+                    
+                    if steps % test_interval == 0:
+                        curr_val_loss = self.evaluate(val_loader)
+                        self.val_loss_list[-1].append(curr_val_loss)
+                        
+                        is_best = curr_val_loss <= self.best_val_loss
+                        if is_best:
+                            self.best_val_loss = curr_val_loss
+                            self.best_model_state = self.model.state_dict()
+
+                        self.save_checkpoint(ep, steps, curr_val_loss, is_best)
+                        print(f'Step {steps} Loss: {loss.item():.4f}, Val Loss: {curr_val_loss:.4f}, LR: {self.lr_scheduler.get_last_lr()[0]:.6f}')
+
+                    # Check max steps
+                    if steps >= max_steps:
+                        print(f"\nReached max steps: {max_steps}")
+                        final_val_loss = self.evaluate(val_loader)
+                        is_best = final_val_loss <= self.best_val_loss
+                        self.save_checkpoint(ep + 1, steps, final_val_loss, is_best)
+                        return
+                
+                else:
+                    # Update progress bar for accumulation progress
+                    epoch_pbar.set_postfix({
+                        'Loss': f'{scaled_loss.item():.4f}',
+                        'LR': f'{self.lr_scheduler.get_last_lr()[0]:.6f}',
+                        'Step': steps,
+                        'AccumStep': f'{accumulation_step % self.gradient_accumulation_steps}/{self.gradient_accumulation_steps}'
+                    })
+
+            # Handle incomplete accumulation at epoch end
+            if accumulation_step % self.gradient_accumulation_steps != 0:
+                print(f"End of epoch: Processing incomplete accumulation batch ({accumulation_step % self.gradient_accumulation_steps}/{self.gradient_accumulation_steps})")
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.step()
+                self.lr_scheduler.step()
+                self.optimizer.zero_grad()
+                steps += 1
 
             avg_loss = epoch_loss / len(train_loader)
             print(f'Epoch {ep+1} Average loss: {avg_loss:.4f}, LR: {self.lr_scheduler.get_last_lr()[0]:.6f}')
@@ -162,15 +206,15 @@ class Trainer():
         
         with torch.no_grad():
             for batch in val_loader:
-                src, tgt = batch
-                src, tgt = src.to(self.device), tgt.to(self.device)
+                source = batch['source'].to(self.device)
+                target = batch['target'].to(self.device)
                 
                 # Prepare input and target for teacher forcing
-                tgt_input = tgt[:, :-1]  # All but last token as input
-                tgt_output = tgt[:, 1:]  # All but first token as target
+                tgt_input = target[:, :-1]  # All but last token as input
+                tgt_output = target[:, 1:]  # All but first token as target
                 
                 # Forward pass
-                output = self.model(src, tgt_input)
+                output = self.model(source, tgt_input)
                 
                 # Reshape for loss calculation
                 output = output.reshape(-1, output.size(-1))
