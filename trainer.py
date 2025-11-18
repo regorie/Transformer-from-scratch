@@ -101,7 +101,12 @@ class Trainer:
                         loss = self.criterion(outputs, target_output)
                         # Apply mask to loss (zero out loss for padded tokens)
                         loss = loss * trg_output_mask.float()
-                        loss = loss.sum() / trg_output_mask.sum()  # Average over non-padded tokens
+                        # Check for valid tokens before division
+                        valid_tokens = trg_output_mask.sum()
+                        if valid_tokens > 0:
+                            loss = loss.sum() / valid_tokens  # Average over non-padded tokens
+                        else:
+                            loss = torch.tensor(0.0, device=self.device, requires_grad=True)
                 else:
                     outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
                     # Reshape for loss calculation
@@ -113,10 +118,21 @@ class Trainer:
                     loss = self.criterion(outputs, target_output)
                     # Apply mask to loss (zero out loss for padded tokens)
                     loss = loss * trg_output_mask.float()
-                    loss = loss.sum() / trg_output_mask.sum()  # Average over non-padded tokens
+                    # Check for valid tokens before division
+                    valid_tokens = trg_output_mask.sum()
+                    if valid_tokens > 0:
+                        loss = loss.sum() / valid_tokens  # Average over non-padded tokens
+                    else:
+                        loss = torch.tensor(0.0, device=self.device, requires_grad=True)
                 
                 # Scale loss by accumulation steps
                 loss = loss / self.gradient_accumulation_step
+                
+                # Check for NaN loss
+                if torch.isnan(loss) or torch.isinf(loss):
+                    print(f"Warning: NaN/Inf loss detected at step {steps}, skipping batch")
+                    continue
+                    
                 accumulated_loss += loss.item()
                 
                 # Backward pass
@@ -130,9 +146,14 @@ class Trainer:
                 # Update weights every gradient_accumulation_step
                 if accumulation_step % self.gradient_accumulation_step == 0:
                     if self.use_mixed_precision:
+                        # Gradient clipping for mixed precision
+                        self.scalar.unscale_(self.optimizer)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         self.scalar.step(self.optimizer)
                         self.scalar.update()
                     else:
+                        # Gradient clipping for normal training
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         self.optimizer.step()
                     
                     self.optimizer.zero_grad()

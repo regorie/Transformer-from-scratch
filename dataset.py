@@ -84,11 +84,13 @@ def calculate_batch_size(avg_tokens, target_tokens_per_batch, gradient_accumulat
         return 32  # Default batch size
     
     batch_size = max(1, int(target_tokens_per_batch / gradient_accumulation_step / avg_tokens))
+    # Limit batch size to prevent memory issues and gradient explosion
+    #batch_size = min(batch_size, 128)  # Cap at reasonable maximum
     effective_tokens = batch_size * gradient_accumulation_step * avg_tokens
     print(f"Recommended batch size: {batch_size} (avg tokens: {avg_tokens:.2f}, grad_accum: {gradient_accumulation_step}, effective tokens per update: {effective_tokens:.0f})")
     return batch_size
 
-def create_dataloader(lang, vocab_src=None, vocab_trg=None, token_per_batch=25000, batch_size=128, mode='train', gradient_accumulation_step=5, auto_batch_size=True):
+def create_dataloader(lang, vocab_src=None, vocab_trg=None, token_per_batch=25000, batch_size=128, mode='train', gradient_accumulation_step=1, auto_batch_size=True):
     # lang example ['en', 'de']
     if vocab_src is None:
         vocab_src, _ = load_vocab(f'./datasets/wmt14_{lang[0]}_{lang[1]}/vocab_{lang[0]}.pkl')
