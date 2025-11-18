@@ -90,7 +90,7 @@ class Trainer:
                 
                 # Forward pass with mixed precision if enabled
                 if self.use_mixed_precision:
-                    with autocast('cuda'):
+                    with autocast(device_type=self.device):
                         outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
                         # Reshape for loss calculation
                         outputs = outputs.reshape(-1, outputs.size(-1))
