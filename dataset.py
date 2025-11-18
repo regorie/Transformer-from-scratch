@@ -79,7 +79,7 @@ def calculate_batch_size(avg_tokens, target_tokens_per_batch, gradient_accumulat
     Returns:
         Recommended batch size
     """
-    # TODO consider gradient accumulation method
+    
     if avg_tokens <= 0:
         return 32  # Default batch size
     
