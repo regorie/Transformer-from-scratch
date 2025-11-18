@@ -36,7 +36,7 @@ parser.add_argument("--train_batch_size", type=int, default=128) # batch size ca
 parser.add_argument("--test_batch_size", type=int, default=128)
 
 parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-parser.add_argument("--mixed_precision", action='store_true', default=True, help="Use mixed precision training (FP16)")
+parser.add_argument("--mixed_precision", action=argparse.BooleanOptionalAction)
 
 parser.add_argument("--lr_warmup", '-lrw', type=int, default=4000)
 parser.add_argument("--dropout", '-drop', type=float, default=0.1)
