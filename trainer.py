@@ -1,5 +1,5 @@
 import torch
-from torch.cuda.amp import autocast, GradScaler
+#from torch.cuda.amp import autocast, GradScaler
 from tqdm import tqdm
 import os
 from collections import deque
@@ -52,7 +52,7 @@ class Trainer:
 
         self.gradient_accumulation_step = gradient_accumulation_steps
         self.use_mixed_precision = use_mixed_precision and torch.cuda.is_available()
-        self.scalar = GradScaler('cuda') if self.use_mixed_precision else None
+        self.scalar = torch.GradScaler('cuda') if self.use_mixed_precision else None
 
         os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -90,7 +90,7 @@ class Trainer:
                 
                 # Forward pass with mixed precision if enabled
                 if self.use_mixed_precision:
-                    with autocast(device_type=self.device.type):
+                    with torch.autocast(device_type=self.device.type):
                         outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
                         # Reshape for loss calculation
                         outputs = outputs.reshape(-1, outputs.size(-1))
