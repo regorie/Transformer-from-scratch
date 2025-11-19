@@ -28,13 +28,13 @@ parser.add_argument("--d_v", type=int, default=64)
 # args for training loop
 parser.add_argument("--epoch", '-ep', type=int, default=300)
 parser.add_argument("--max_steps", '-ms', type=int, default=100000) # max_steps are primary
-parser.add_argument("--batch_token", '-b', type=int, default=25000)
-parser.add_argument("--auto_batch_calculate", action=argparse.BooleanOptionalAction)
-parser.add_argument("--train_batch_size", type=int, default=128) # batch size can be set manually
-parser.add_argument("--test_batch_size", type=int, default=128)
+parser.add_argument("--batch_token", '-b', type=int, default=25000)  # Reduced for memory safety
+parser.add_argument("--auto_batch_calculate", action=argparse.BooleanOptionalAction, default=True)
+parser.add_argument("--train_batch_size", type=int, default=32) # Reduced default batch size
+parser.add_argument("--test_batch_size", type=int, default=32)  # Reduced default batch size
 
-parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-parser.add_argument("--mixed_precision", action=argparse.BooleanOptionalAction)
+parser.add_argument("--gradient_accumulation_steps", type=int, default=8)  # Increased for smaller batches
+parser.add_argument("--mixed_precision", action=argparse.BooleanOptionalAction, default=True)  # Enable by default
 
 parser.add_argument("--lr_warmup", '-lrw', type=int, default=4000)
 parser.add_argument("--dropout", '-drop', type=float, default=0.1)

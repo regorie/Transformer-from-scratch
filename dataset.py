@@ -30,7 +30,7 @@ def text_to_ids(text, vocab, add_special_tokens=True):
 
 
 class TranslationDataset(Dataset):
-    def __init__(self, src_file, trg_file, vocab, max_length=512):
+    def __init__(self, src_file, trg_file, vocab, max_length=100):
         self.src_sentences = []
         self.trg_sentences = []
         self.vocab = vocab
@@ -39,18 +39,21 @@ class TranslationDataset(Dataset):
         # Load and convert sentences
         src_token_counts = []
         trg_token_counts = []
+        skipped_count = 0
         
         with open(src_file, 'r') as f_src, open(trg_file, 'r') as f_trg:
             for src_line, trg_line in zip(f_src, f_trg):
                 src_ids = text_to_ids(src_line, vocab, add_special_tokens=False)
                 trg_ids = text_to_ids(trg_line, vocab)
                 
-                # Skip very long sentences
+                # STRICT length filtering to prevent memory issues
                 if len(src_ids) <= max_length and len(trg_ids) <= max_length:
                     self.src_sentences.append(src_ids)
                     self.trg_sentences.append(trg_ids)
                     src_token_counts.append(len(src_ids))
                     trg_token_counts.append(len(trg_ids))
+                else:
+                    skipped_count += 1
         
         # Calculate average token counts
         self.avg_src_tokens = sum(src_token_counts) / len(src_token_counts) if src_token_counts else 0
@@ -59,9 +62,14 @@ class TranslationDataset(Dataset):
         
         print(f"Dataset statistics:")
         print(f"  Total sentences: {len(self.src_sentences)}")
+        print(f"  Skipped sentences (too long): {skipped_count}")
+        print(f"  Max length limit: {max_length}")
         print(f"  Average source tokens: {self.avg_src_tokens:.2f}")
         print(f"  Average target tokens: {self.avg_trg_tokens:.2f}")
         print(f"  Average total tokens per sentence pair: {self.avg_total_tokens:.2f}")
+        if src_token_counts:
+            print(f"  Max source length: {max(src_token_counts)}")
+            print(f"  Max target length: {max(trg_token_counts)}")
     
     def __len__(self):
         return len(self.src_sentences)
@@ -107,11 +115,16 @@ def calculate_batch_size(avg_tokens, target_tokens_per_batch, gradient_accumulat
     if avg_tokens <= 0:
         return 32  # Default batch size
     
+    # Calculate batch size to achieve target tokens per batch
     batch_size = max(1, int(target_tokens_per_batch / gradient_accumulation_step / avg_tokens))
-    # Limit batch size to prevent memory issues and gradient explosion
-    #batch_size = min(batch_size, 128)  # Cap at reasonable maximum
+    
+    # CRITICAL: Cap batch size to prevent memory issues
+    # For sequences ~30 tokens average, max batch size should be much smaller
+    max_batch_size = min(128, max(8, int(4000 / avg_tokens)))  # Adaptive max based on sequence length
+    batch_size = min(batch_size, max_batch_size)
+    
     effective_tokens = batch_size * gradient_accumulation_step * avg_tokens
-    print(f"Recommended batch size: {batch_size} (avg tokens: {avg_tokens:.2f}, grad_accum: {gradient_accumulation_step}, effective tokens per update: {effective_tokens:.0f})")
+    print(f"Recommended batch size: {batch_size} (avg tokens: {avg_tokens:.2f}, grad_accum: {gradient_accumulation_step}, effective tokens per update: {effective_tokens:.0f}, max_allowed: {max_batch_size})")
     return batch_size
 
 def create_dataloader(lang, vocab, token_per_batch=25000, batch_size=128, mode='train', gradient_accumulation_step=1, auto_batch_size=True):

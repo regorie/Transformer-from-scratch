@@ -51,8 +51,16 @@ class Trainer:
         self.max_checkpoint = max_checkpoint
 
         self.gradient_accumulation_step = gradient_accumulation_steps
-        self.use_mixed_precision = use_mixed_precision and torch.cuda.is_available()
-        self.scalar = torch.GradScaler('cuda') if self.use_mixed_precision else None
+        self.use_mixed_precision = use_mixed_precision and (torch.cuda.is_available() or torch.backends.mps.is_available())
+        
+        # Initialize scaler for mixed precision
+        if self.use_mixed_precision:
+            if torch.cuda.is_available():
+                self.scalar = torch.cuda.amp.GradScaler('cuda')
+            else:
+                self.scalar = torch.amp.GradScaler('cpu')  # For MPS/CPU
+        else:
+            self.scalar = None
 
         os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -62,6 +70,11 @@ class Trainer:
         self.val_loss_list = []
         self.train_loss_list = []
         self.checkpoint_files = deque(maxlen=max_checkpoint)
+        
+        # Memory optimization settings
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()  # Clear cache at start
+        print(f"Mixed precision enabled: {self.use_mixed_precision}")
 
     def train(self, epoch, max_steps, test_interval):
         self.model.train()
@@ -92,7 +105,13 @@ class Trainer:
                 
                 # Forward pass with mixed precision if enabled
                 if self.use_mixed_precision:
-                    with torch.autocast(device_type=self.device.type):
+                    # Use the correct autocast context for the device
+                    if torch.cuda.is_available():
+                        autocast_context = torch.cuda.amp.autocast('cuda')
+                    else:
+                        autocast_context = torch.amp.autocast(device_type=self.device.type)
+                        
+                    with autocast_context:
                         outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
                         # Reshape for loss calculation
                         outputs = outputs.reshape(-1, outputs.size(-1))
@@ -162,7 +181,10 @@ class Trainer:
                     })
                     
                     accumulated_loss = 0.0
-                    accumulation_step = 0  # Reset accumulation counter - THIS WAS THE CRITICAL BUG!
+                    
+                    # Clear GPU cache periodically to prevent memory fragmentation
+                    if torch.cuda.is_available() and steps % 100 == 0:
+                        torch.cuda.empty_cache()
                     
                     # Validation and checkpointing
                     if steps % test_interval == 0:
@@ -170,6 +192,12 @@ class Trainer:
                         self.val_loss_list[ep].append(val_loss)
                         self.save_checkpoint(ep, steps, val_loss)
                         self.model.train()  # Switch back to training mode
+                        
+                        # Log memory usage if CUDA available
+                        if torch.cuda.is_available():
+                            memory_allocated = torch.cuda.memory_allocated() / 1024**3  # GB
+                            memory_reserved = torch.cuda.memory_reserved() / 1024**3   # GB
+                            print(f"GPU Memory: {memory_allocated:.2f}GB allocated, {memory_reserved:.2f}GB reserved")
                     
                     # Stop if max_steps reached
                     if steps >= max_steps:
