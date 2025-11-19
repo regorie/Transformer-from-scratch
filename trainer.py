@@ -56,9 +56,9 @@ class Trainer:
         # Initialize scaler for mixed precision
         if self.use_mixed_precision:
             if torch.cuda.is_available():
-                self.scalar = torch.cuda.amp.GradScaler('cuda')
+                self.scalar = torch.GradScaler('cuda')
             else:
-                self.scalar = torch.amp.GradScaler('cpu')  # For MPS/CPU
+                self.scalar = torch.GradScaler('cpu')  # For MPS/CPU
         else:
             self.scalar = None
 
@@ -107,9 +107,9 @@ class Trainer:
                 if self.use_mixed_precision:
                     # Use the correct autocast context for the device
                     if torch.cuda.is_available():
-                        autocast_context = torch.cuda.amp.autocast('cuda')
+                        autocast_context = torch.autocast('cuda')
                     else:
-                        autocast_context = torch.amp.autocast(device_type=self.device.type)
+                        autocast_context = torch.autocast(device_type=self.device.type)
                         
                     with autocast_context:
                         outputs = self.model(source, decoder_input, src_mask, trg_input_mask)

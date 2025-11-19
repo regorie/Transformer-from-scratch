@@ -120,11 +120,11 @@ def calculate_batch_size(avg_tokens, target_tokens_per_batch, gradient_accumulat
     
     # CRITICAL: Cap batch size to prevent memory issues
     # For sequences ~30 tokens average, max batch size should be much smaller
-    max_batch_size = min(128, max(8, int(4000 / avg_tokens)))  # Adaptive max based on sequence length
-    batch_size = min(batch_size, max_batch_size)
+    #max_batch_size = min(128, max(8, int(4000 / avg_tokens)))  # Adaptive max based on sequence length
+    #batch_size = min(batch_size, max_batch_size)
     
     effective_tokens = batch_size * gradient_accumulation_step * avg_tokens
-    print(f"Recommended batch size: {batch_size} (avg tokens: {avg_tokens:.2f}, grad_accum: {gradient_accumulation_step}, effective tokens per update: {effective_tokens:.0f}, max_allowed: {max_batch_size})")
+    print(f"Recommended batch size: {batch_size} (avg tokens: {avg_tokens:.2f}, grad_accum: {gradient_accumulation_step}, effective tokens per update: {effective_tokens:.0f})")
     return batch_size
 
 def create_dataloader(lang, vocab, token_per_batch=25000, batch_size=128, mode='train', gradient_accumulation_step=1, auto_batch_size=True):
