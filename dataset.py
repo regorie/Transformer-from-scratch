@@ -1,15 +1,39 @@
 import pickle
 import torch
 from torch.utils.data import Dataset, DataLoader
-from convert_to_IDs import text_to_ids
-from build_vocab import load_vocab, PAD, UNK, BOS, EOS
+import json
+
+PAD=0
+EOS=1
+BOS=2
+UNK=3
+
+def load_vocab(file_path):
+    with open(file_path, 'r') as f:
+        tok2id = json.load(f)
+
+    return tok2id
+
+def text_to_ids(text, vocab, add_special_tokens=True):
+    """Convert BPE text to sequence of IDs"""
+    tokens = text.strip().split()
+    
+    if add_special_tokens:
+        tokens = ['<BOS>'] + tokens + ['<EOS>']
+    
+    # Convert to IDs, use <unk> for unknown tokens
+    ids = []
+    for token in tokens:
+        ids.append(vocab.get(token, vocab['<UNK>']))
+    
+    return ids
+
 
 class TranslationDataset(Dataset):
-    def __init__(self, src_file, trg_file, vocab_src, vocab_trg, max_length=512):
+    def __init__(self, src_file, trg_file, vocab, max_length=512):
         self.src_sentences = []
         self.trg_sentences = []
-        self.vocab_src = vocab_src
-        self.vocab_trg = vocab_trg
+        self.vocab = vocab
         self.max_length = max_length
         
         # Load and convert sentences
@@ -18,8 +42,8 @@ class TranslationDataset(Dataset):
         
         with open(src_file, 'r') as f_src, open(trg_file, 'r') as f_trg:
             for src_line, trg_line in zip(f_src, f_trg):
-                src_ids = text_to_ids(src_line, vocab_src, add_special_tokens=False)
-                trg_ids = text_to_ids(trg_line, vocab_trg)
+                src_ids = text_to_ids(src_line, vocab, add_special_tokens=False)
+                trg_ids = text_to_ids(trg_line, vocab)
                 
                 # Skip very long sentences
                 if len(src_ids) <= max_length and len(trg_ids) <= max_length:
@@ -90,25 +114,23 @@ def calculate_batch_size(avg_tokens, target_tokens_per_batch, gradient_accumulat
     print(f"Recommended batch size: {batch_size} (avg tokens: {avg_tokens:.2f}, grad_accum: {gradient_accumulation_step}, effective tokens per update: {effective_tokens:.0f})")
     return batch_size
 
-def create_dataloader(lang, vocab_src=None, vocab_trg=None, token_per_batch=25000, batch_size=128, mode='train', gradient_accumulation_step=1, auto_batch_size=True):
+def create_dataloader(lang, vocab, token_per_batch=25000, batch_size=128, mode='train', gradient_accumulation_step=1, auto_batch_size=True):
     # lang example ['en', 'de']
-    if vocab_src is None:
-        vocab_src, _ = load_vocab(f'./datasets/wmt14_{lang[0]}_{lang[1]}/vocab_{lang[0]}.pkl')
-    if vocab_trg is None:
-        vocab_trg, _ = load_vocab(f'./datasets/wmt14_{lang[0]}_{lang[1]}/vocab_{lang[1]}.pkl')
+    if vocab is None:
+        vocab = load_vocab(f'./datasets/wmt14_{lang[0]}_{lang[1]}/vocab.json')
 
     if mode == 'train':
-        dataset = TranslationDataset(f'./datasets/wmt14_{lang[0]}_{lang[1]}/train.{lang[0]}', f'./datasets/wmt14_{lang[0]}_{lang[1]}/train.{lang[1]}', vocab_src, vocab_trg)
+        dataset = TranslationDataset(f'./datasets/wmt14_{lang[0]}_{lang[1]}/train_{lang[0]}.BPE', f'./datasets/wmt14_{lang[0]}_{lang[1]}/train_{lang[1]}.BPE', vocab)
         if auto_batch_size:
             batch_size = calculate_batch_size(dataset.avg_total_tokens, token_per_batch, gradient_accumulation_step)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
     elif mode == 'valid':
-        dataset = TranslationDataset(f'./datasets/wmt14_{lang[0]}_{lang[1]}/valid.{lang[0]}', f'./datasets/wmt14_{lang[0]}_{lang[1]}/valid.{lang[1]}', vocab_src, vocab_trg)
+        dataset = TranslationDataset(f'./datasets/wmt14_{lang[0]}_{lang[1]}/valid_{lang[0]}.BPE', f'./datasets/wmt14_{lang[0]}_{lang[1]}/valid_{lang[1]}.BPE', vocab)
         if auto_batch_size:
             batch_size = calculate_batch_size(dataset.avg_total_tokens, token_per_batch, gradient_accumulation_step)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
     elif mode == 'test':
-        dataset = TranslationDataset(f'./datasets/wmt14_{lang[0]}_{lang[1]}/test.{lang[0]}', f'./datasets/wmt14_{lang[0]}_{lang[1]}/test.{lang[1]}', vocab_src, vocab_trg)
+        dataset = TranslationDataset(f'./datasets/wmt14_{lang[0]}_{lang[1]}/test_{lang[0]}.BPE', f'./datasets/wmt14_{lang[0]}_{lang[1]}/test_{lang[1]}.BPE', vocab)
         if auto_batch_size:
             batch_size = calculate_batch_size(dataset.avg_total_tokens, token_per_batch, gradient_accumulation_step)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)

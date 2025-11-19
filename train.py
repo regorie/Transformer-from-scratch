@@ -5,8 +5,7 @@ from tqdm import tqdm
 import pickle
 
 from model import Transformer
-from dataset import create_dataloader
-from build_vocab import load_vocab, PAD, UNK, BOS, EOS
+from dataset import create_dataloader, load_vocab, PAD, UNK, BOS, EOS
 from trainer import Trainer, LRScheduler
 import argparse
 
@@ -15,8 +14,7 @@ parser.add_argument("--source_lang", default='en')
 parser.add_argument("--target_lang", default='de')
 
 # data info and arg
-parser.add_argument("--src_vocab", default=None) # vocab files can be given explicitly
-parser.add_argument("--trg_vocab", default=None)
+parser.add_argument("--vocab", default=None) # vocab files can be given explicitly
 parser.add_argument("--max_length", type=int, default=100) # maximum length of sentences
 
 # args for model
@@ -50,28 +48,25 @@ parser.add_argument("--max_checkpoint", default=5)
 
 args = parser.parse_args()
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#device = torch.device('mps')
+#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('mps')
 
 
 if __name__=="__main__":
 
     # load vocab if given
-    vocab_src, vocab_trg = None, None
-    if args.src_vocab is not None:
-        vocab_src, _ = load_vocab(args.src_vocab)
-    if args.trg_vocab is not None:
-        vocab_trg, _ = load_vocab(args.trg_vocab)
+    vocab = None
+    if args.vocab is not None:
+        vocab = load_vocab(args.vocab)
 
     # prepare data
     lang = [args.source_lang, args.target_lang]
-    train_loader = create_dataloader(lang, vocab_src=vocab_src, vocab_trg=vocab_trg, token_per_batch=args.batch_token, batch_size=args.train_batch_size, mode='train', gradient_accumulation_step=args.gradient_accumulation_steps, auto_batch_size=args.auto_batch_calculate)
-    val_loader = create_dataloader(lang, vocab_src=vocab_src, vocab_trg=vocab_trg, token_per_batch=args.batch_token, batch_size=args.test_batch_size, mode='valid', gradient_accumulation_step=args.gradient_accumulation_steps, auto_batch_size=args.auto_batch_calculate)
-    test_loader = create_dataloader(lang, vocab_src=vocab_src, vocab_trg=vocab_trg, token_per_batch=args.batch_token, batch_size=args.test_batch_size, mode='test', gradient_accumulation_step=args.gradient_accumulation_steps, auto_batch_size=args.auto_batch_calculate)
+    train_loader = create_dataloader(lang, vocab, token_per_batch=args.batch_token, batch_size=args.train_batch_size, mode='train', gradient_accumulation_step=args.gradient_accumulation_steps, auto_batch_size=args.auto_batch_calculate)
+    val_loader = create_dataloader(lang, vocab, token_per_batch=args.batch_token, batch_size=args.test_batch_size, mode='valid', gradient_accumulation_step=args.gradient_accumulation_steps, auto_batch_size=args.auto_batch_calculate)
+    test_loader = create_dataloader(lang, vocab, token_per_batch=args.batch_token, batch_size=args.test_batch_size, mode='test', gradient_accumulation_step=args.gradient_accumulation_steps, auto_batch_size=args.auto_batch_calculate)
 
     # get vocab size
-    src_vocab_size = len(train_loader.dataset.vocab_src)
-    trg_vocab_size = len(train_loader.dataset.vocab_trg)
+    vocab_size = len(train_loader.dataset.vocab)
 
     # prepare model
     encoder_args = {'self_attention': {'d_k': args.d_k, 'd_v': args.d_v, 'n_head': args.n_head, 'max_length': args.max_length, 'mask': False},
@@ -80,12 +75,12 @@ if __name__=="__main__":
                     'attention': {'d_k': args.d_k, 'd_v': args.d_v, 'n_head': args.n_head, 'max_length': args.max_length, 'mask': False},
                     'dropout': args.dropout}
     
-    model = Transformer(args.encoder_layers, args.decoder_layers, args.embed_dim, src_vocab_size, trg_vocab_size, args.dropout,
+    model = Transformer(args.encoder_layers, args.decoder_layers, args.embed_dim, vocab_size, args.dropout,
                  encoder_args, decoder_args)
     model = model.to(device)
 
     # prepare training and setup trainer
-    optimizer = optim.Adam(model.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9)
+    optimizer = optim.Adam(model.parameters(), lr=0.0, betas=(0.9, 0.98), eps=1e-9)
     criterion = nn.CrossEntropyLoss(ignore_index=PAD, label_smoothing=args.label_smoothing)
 
     scheduler = LRScheduler(optimizer, args.embed_dim, warmup_steps=args.lr_warmup)

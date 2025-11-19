@@ -27,7 +27,7 @@ class EncoderLayer(nn.Module):
         residual = input.clone()
 
         # Apply dropout to sub-layer output BEFORE adding residual and normalizing
-        output = self.attention(input, input, input, mask)
+        output = self.attention(input, input, input, mask, mask)
         output = self.dropout1(output)  # Dropout BEFORE residual connection
         output = self.layer_norm1(output + residual)
 
@@ -69,13 +69,13 @@ class DecoderLayer(nn.Module):
 
         residual = input.clone()
         # Apply dropout to sub-layer output BEFORE adding residual and normalizing
-        self_attention = self.masked_attention(input, input, input, trg_mask, causal=True)
+        self_attention = self.masked_attention(input, input, input, trg_mask, trg_mask, masked=True)
         self_attention = self.dropout1(self_attention)  # Dropout BEFORE residual connection
         self_attention = self.layer_norm1(self_attention + residual)
 
         residual = self_attention.clone()
         # Apply dropout to sub-layer output BEFORE adding residual and normalizing
-        output = self.attention(self_attention, encoder_output, encoder_output, src_mask)
+        output = self.attention(self_attention, encoder_output, encoder_output, None, src_mask)
         output = self.dropout2(output)  # Dropout BEFORE residual connection
         output = self.layer_norm2(output + residual)
 
@@ -89,7 +89,7 @@ class DecoderLayer(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, embed_dim, max_len, device):
+    def __init__(self, embed_dim, max_len, device='cpu'):
         super(PositionalEncoding, self).__init__()
 
         pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -97,15 +97,15 @@ class PositionalEncoding(nn.Module):
 
         encoding = torch.zeros(max_len, embed_dim)
         encoding[:, 0::2] = torch.sin(pos / (10000 ** (_2i / embed_dim)))
-        encoding[:, 1::2] = torch.cos(pos / (10000 ** (_2i[:embed_dim//2] / embed_dim)))
+        encoding[:, 1::2] = torch.cos(pos / (10000 ** (_2i / embed_dim)))  # FIXED: removed [:embed_dim//2]
         
         self.register_buffer('pos_encoding', encoding)
 
     def forward(self, x):
         # x shape : (batch_size, seq_length, embed_dim)
         seq_len = x.shape[1]
-        x = torch.add(x, self.pos_encoding[:seq_len,:])
-        return x
+        # pos_encoding is automatically on the same device as x due to register_buffer
+        return x + self.pos_encoding[:seq_len, :].unsqueeze(0)
 
 class LayerNorm(nn.Module):
     def __init__(self, embed_dim, eps=1e-12):
@@ -125,7 +125,6 @@ class LayerNorm(nn.Module):
         return out
 
 class MultiheadAttention(nn.Module):
-    #def __init__(self, embed_dim, n_head, d_k, d_v, device, max_length=None, mask=False):
     def __init__(self, embed_dim, args):
         super(MultiheadAttention, self).__init__()
         d_k = args['d_k']
@@ -143,27 +142,22 @@ class MultiheadAttention(nn.Module):
         self.n_head = n_head
         self.attention = None
 
-        if max_length and args.get('mask', False):
-            mask = torch.triu(torch.ones(max_length, max_length), diagonal=1)
-            mask = mask.masked_fill(mask==1, float('-inf'))
-            self.register_buffer('mask', mask)
-        else:
-            self.mask = None
 
-    def forward(self, query, key, value, padding_mask=None, causal=False):
+    def forward(self, query, key, value, q_padding_mask=None, v_padding_mask=None, masked=False):
         # query shape : (batch_size, q_seq_len, embed_dim)
         # key, value shape : (batch_size, seq_len, embed_dim)
-        # padding_mask shape : (batch_size, seq_len) - True for real tokens, False for padding
+        # q_padding_mask shape : (batch_size, q_seq_len) = True for real tokens, False for padding
+        # v_padding_mask shape : (batch_size, sseq_len) = True for real tokens, False for padding
         # output (batch_size, q_seq_len, embed_dim)
 
         batch_size, q_seq_len, embed_dim = query.shape
-        batch_size, seq_len, embed_dim = key.shape
+        batch_size, seq_len, embed_dim = value.shape
 
         query = self.W_q(query) # (batch_size, q_seq_len, d_k*n_head)
         key = self.W_k(key) # (batch_size, seq_len, d_k*n_head)
         value = self.W_v(value) # (batch_size, seq_len, d_v*n_head)
         
-        # Reshape for multi-head attention
+        # Split for multi-head attention
         query = query.reshape(batch_size, q_seq_len, self.n_head, self.d_k) # (batch_size, q_seq_len, n_head, d_k)
         key = key.reshape(batch_size, seq_len, self.n_head, self.d_k) # (batch_size, seq_len, n_head, d_k)
         value = value.reshape(batch_size, seq_len, self.n_head, self.d_v) # (batch_size, seq_len, n_head, d_v)
@@ -175,44 +169,40 @@ class MultiheadAttention(nn.Module):
         
         # Compute attention scores
         attention = torch.matmul(query, key.transpose(-2, -1)) # (batch_size, n_head, q_seq_len, seq_len)
-        
-        # Apply causal mask if needed (for decoder self-attention)
-        if causal or self.mask is not None:
-            # Check if we can use pre-computed mask
-            if (self.mask is not None and 
-                q_seq_len <= self.mask.size(0) and 
-                seq_len <= self.mask.size(1)):
-                # Use pre-computed mask if sequences fit
-                mask_slice = self.mask[:q_seq_len, :seq_len]
-            else:
-                # Create dynamic causal mask for longer sequences or when self.mask is None
-                mask_slice = torch.triu(torch.ones(q_seq_len, seq_len, device=attention.device), diagonal=1)
-                mask_slice = mask_slice.masked_fill(mask_slice == 1, float('-inf'))
-            
-            mask_expanded = mask_slice.unsqueeze(0).unsqueeze(0)
-            mask_expanded = mask_expanded.expand(batch_size, self.n_head, q_seq_len, seq_len)
-            attention = attention + mask_expanded
-        
-        # Apply padding mask if provided
-        if padding_mask is not None:
-            # Convert padding mask to attention mask
-            # padding_mask: (batch_size, seq_len) - True for real tokens, False for padding
-            # We need to mask out the padded positions in the key/value sequence
-            padding_mask_expanded = padding_mask.unsqueeze(1).unsqueeze(1)  # (batch_size, 1, 1, seq_len)
-            padding_mask_expanded = padding_mask_expanded.expand(batch_size, self.n_head, q_seq_len, seq_len)
-            attention = attention.masked_fill(~padding_mask_expanded, float('-inf'))
+        # Scale
+        attention /= math.sqrt(self.d_k)
 
-        attention = F.softmax(attention / math.sqrt(self.d_k), dim=-1) # (batch_size, n_head, q_seq_len, seq_len)
+        # Apply causal mask for decoder self-attention (before padding mask)
+        if masked:
+            causal_mask = torch.triu(torch.ones(q_seq_len, seq_len, device=attention.device), diagonal=1).bool()
+            attention = attention.masked_fill(causal_mask, float('-inf'))
+
+        # Apply padding mask
+        if v_padding_mask is not None:
+            # Convert padding mask to attention mask format
+            # v_padding_mask: (batch_size, seq_len) -> (batch_size, 1, 1, seq_len)
+            mask = v_padding_mask.unsqueeze(1).unsqueeze(1)
+            attention = attention.masked_fill(~mask, float('-inf'))
         
-        # Handle case where all attention weights are -inf (all padded)
-        attention = torch.nan_to_num(attention, nan=0.0, posinf=0.0, neginf=0.0)
-        
+        if q_padding_mask is not None:
+            # q_padding_mask: (batch_size, q_seq_len) -> (batch_size, 1, q_seq_len, 1)
+            mask = q_padding_mask.unsqueeze(1).unsqueeze(-1)
+            attention = attention.masked_fill(~mask, float('-inf'))
+
+        # Softmax
+        attention = F.softmax(attention, dim=-1)
+        # replace NaN with 0
+        attention = torch.where(torch.isnan(attention), torch.zeros_like(attention), attention)
+
+        self.attention = attention
+
         # Apply attention to values
-        output = torch.matmul(attention, value) # (batch_size, n_head, q_seq_len, d_v)
+        # (batch_size, n_head, q_seq_len, seq_len) * (batch_size, n_head, seq_len, d_v) -> (batch_size, n_head, q_seq_len, d_v)
+        output = torch.matmul(attention, value)
         output = output.transpose(1, 2) # (batch_size, q_seq_len, n_head, d_v)
 
         # concat and linear
         output = output.reshape(batch_size, q_seq_len, self.n_head * self.d_v)
         output = self.W_concat(output) # (batch_size, q_seq_len, embed_dim)
-
         return output
+

@@ -69,6 +69,8 @@ class Trainer:
         accumulation_step = 0
         accumulated_loss = 0.0
 
+        self.optimizer.zero_grad()
+
         for ep in range(epoch):
             epoch_loss = 0.0
             self.val_loss_list.append([])
@@ -99,14 +101,7 @@ class Trainer:
                         
                         # Only calculate loss for non-padded tokens
                         loss = self.criterion(outputs, target_output)
-                        # Apply mask to loss (zero out loss for padded tokens)
-                        loss = loss * trg_output_mask.float()
-                        # Check for valid tokens before division
-                        valid_tokens = trg_output_mask.sum()
-                        if valid_tokens > 0:
-                            loss = loss.sum() / valid_tokens  # Average over non-padded tokens
-                        else:
-                            loss = torch.tensor(0.0, device=self.device, requires_grad=True)
+
                 else:
                     outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
                     # Reshape for loss calculation
@@ -116,15 +111,7 @@ class Trainer:
                     
                     # Only calculate loss for non-padded tokens
                     loss = self.criterion(outputs, target_output)
-                    # Apply mask to loss (zero out loss for padded tokens)
-                    loss = loss * trg_output_mask.float()
-                    # Check for valid tokens before division
-                    valid_tokens = trg_output_mask.sum()
-                    if valid_tokens > 0:
-                        loss = loss.sum() / valid_tokens  # Average over non-padded tokens
-                    else:
-                        loss = torch.tensor(0.0, device=self.device, requires_grad=True)
-                
+
                 # Scale loss by accumulation steps
                 loss = loss / self.gradient_accumulation_step
                 
@@ -145,15 +132,18 @@ class Trainer:
                 
                 # Update weights every gradient_accumulation_step
                 if accumulation_step % self.gradient_accumulation_step == 0:
+                    # Check gradients before clipping
+                    grad_norm = self._compute_grad_norm()
+                    
                     if self.use_mixed_precision:
                         # Gradient clipping for mixed precision
                         self.scalar.unscale_(self.optimizer)
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        clipped_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         self.scalar.step(self.optimizer)
                         self.scalar.update()
                     else:
                         # Gradient clipping for normal training
-                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        clipped_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         self.optimizer.step()
                     
                     self.optimizer.zero_grad()
@@ -163,14 +153,16 @@ class Trainer:
                     avg_loss = accumulated_loss / self.gradient_accumulation_step
                     self.train_loss_list[ep].append(avg_loss)
                     
-                    # Update progress bar
+                    # Update progress bar with gradient info
                     epoch_pbar.set_postfix({
                         'loss': f'{avg_loss:.4f}',
                         'lr': f'{self.lr_scheduler.get_last_lr()[0]:.6f}',
+                        'grad_norm': f'{grad_norm:.3f}',
                         'step': steps
                     })
                     
                     accumulated_loss = 0.0
+                    accumulation_step = 0  # Reset accumulation counter - THIS WAS THE CRITICAL BUG!
                     
                     # Validation and checkpointing
                     if steps % test_interval == 0:
@@ -270,3 +262,67 @@ class Trainer:
             best_path = os.path.join(self.checkpoint_dir, 'best_model.pt')
             torch.save(self.best_model_state, best_path)
             print(f"New best model saved with validation loss: {val_loss:.4f}")
+
+    def _compute_grad_norm(self):
+        """Compute the L2 norm of gradients"""
+        total_norm = 0.0
+        for param in self.model.parameters():
+            if param.grad is not None:
+                param_norm = param.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** (1. / 2)
+        return total_norm
+
+    def check_gradients(self, verbose=False):
+        """Check gradient statistics"""
+        grad_stats = {}
+        
+        for name, param in self.model.named_parameters():
+            if param.grad is not None:
+                grad = param.grad.data
+                grad_stats[name] = {
+                    'mean': grad.mean().item(),
+                    'std': grad.std().item(),
+                    'norm': grad.norm().item(),
+                    'max': grad.max().item(),
+                    'min': grad.min().item(),
+                    'has_nan': torch.isnan(grad).any().item(),
+                    'has_inf': torch.isinf(grad).any().item()
+                }
+                
+                if verbose:
+                    print(f"{name:30} | "
+                          f"norm: {grad_stats[name]['norm']:.4f} | "
+                          f"mean: {grad_stats[name]['mean']:.6f} | "
+                          f"std: {grad_stats[name]['std']:.6f}")
+                    
+                    if grad_stats[name]['has_nan']:
+                        print(f"⚠️  WARNING: NaN gradients in {name}")
+                    if grad_stats[name]['has_inf']:
+                        print(f"⚠️  WARNING: Inf gradients in {name}")
+        
+        return grad_stats
+
+    def log_gradient_flow(self, step):
+        """Log gradient flow to detect vanishing/exploding gradients"""
+        layers = []
+        avg_grads = []
+        max_grads = []
+        
+        for name, param in self.model.named_parameters():
+            if param.grad is not None and "bias" not in name:
+                layers.append(name)
+                avg_grads.append(param.grad.abs().mean().item())
+                max_grads.append(param.grad.abs().max().item())
+        
+        print(f"\n=== Gradient Flow Analysis (Step {step}) ===")
+        for i, (layer, avg_grad, max_grad) in enumerate(zip(layers, avg_grads, max_grads)):
+            print(f"{i:2d} {layer:30} | avg: {avg_grad:.6f} | max: {max_grad:.6f}")
+            
+            # Warnings for problematic gradients
+            if avg_grad < 1e-7:
+                print(f"    ⚠️  Vanishing gradients detected!")
+            if avg_grad > 1.0:
+                print(f"    🔥 Large gradients detected!")
+        print("=" * 60)
+    
