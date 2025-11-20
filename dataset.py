@@ -14,12 +14,9 @@ def load_vocab(file_path):
 
     return tok2id
 
-def text_to_ids(text, vocab, add_special_tokens=True):
+def text_to_ids(text, vocab):
     """Convert BPE text to sequence of IDs"""
     tokens = text.strip().split()
-    
-    if add_special_tokens:
-        tokens = ['<BOS>'] + tokens + ['<EOS>']
     
     # Convert to IDs, use <unk> for unknown tokens
     ids = []
@@ -28,11 +25,20 @@ def text_to_ids(text, vocab, add_special_tokens=True):
     
     return ids
 
+def add_special_tokens(tokens, start_tok, end_tok):
+    # tokens list of tensors?
+    for line in tokens:
+        if start_tok: line = torch.tensor([start_tok]) + line
+        if end_tok: line = line + torch.tensor([end_tok])
+    return tokens
+
 
 class TranslationDataset(Dataset):
     def __init__(self, src_file, trg_file, vocab, max_length=100):
         self.src_sentences = []
-        self.trg_sentences = []
+        #self.trg_sentences = []
+        self.trg_input_sentences = []
+        self.trg_output_sentences = []
         self.vocab = vocab
         self.max_length = max_length
         
@@ -43,13 +49,15 @@ class TranslationDataset(Dataset):
         
         with open(src_file, 'r') as f_src, open(trg_file, 'r') as f_trg:
             for src_line, trg_line in zip(f_src, f_trg):
-                src_ids = text_to_ids(src_line, vocab, add_special_tokens=False)
+                src_ids = text_to_ids(src_line, vocab)
                 trg_ids = text_to_ids(trg_line, vocab)
                 
                 # STRICT length filtering to prevent memory issues
                 if len(src_ids) <= max_length and len(trg_ids) <= max_length:
                     self.src_sentences.append(src_ids)
-                    self.trg_sentences.append(trg_ids)
+                    #self.trg_sentences.append(trg_ids)
+                    self.trg_input_sentences.append([BOS]+trg_ids)
+                    self.trg_output_sentences.append(trg_ids+[EOS])
                     src_token_counts.append(len(src_ids))
                     trg_token_counts.append(len(trg_ids))
                 else:
@@ -77,27 +85,36 @@ class TranslationDataset(Dataset):
     def __getitem__(self, idx):
         return {
             'src': torch.tensor(self.src_sentences[idx], dtype=torch.long),
-            'trg': torch.tensor(self.trg_sentences[idx], dtype=torch.long),
+            'trg_input': torch.tensor(self.trg_input_sentences[idx], dtype=torch.long),
+            'trg_output': torch.tensor(self.trg_output_sentences[idx], dtype=torch.long),
         }
     
 def collate_fn(batch, pad_token_id=0):
     """Collate function to pad sequences in a batch"""
     src_sequences = [item['src'] for item in batch]
-    trg_sequences = [item['trg'] for item in batch]
+    trg_input_sequences = [item['trg_input'] for item in batch]
+    trg_output_sequences = [item['trg_output'] for item in batch]
+
+    #trg_input = add_special_tokens(trg_sequences, BOS, None)
+    #trg_output = add_special_tokens(trg_sequences, None, EOS)
     
     # Pad sequences
     src_padded = torch.nn.utils.rnn.pad_sequence(src_sequences, batch_first=True, padding_value=pad_token_id)
-    trg_padded = torch.nn.utils.rnn.pad_sequence(trg_sequences, batch_first=True, padding_value=pad_token_id)
+    trg_input_padded = torch.nn.utils.rnn.pad_sequence(trg_input_sequences, batch_first=True, padding_value=pad_token_id)
+    trg_output_padded = torch.nn.utils.rnn.pad_sequence(trg_output_sequences, batch_first=True, padding_value=pad_token_id)
     
     # Create attention masks (True for real tokens, False for padding)
     src_mask = (src_padded != pad_token_id)
-    trg_mask = (trg_padded != pad_token_id)
+    trg_input_mask = (trg_input_padded != pad_token_id) # False for padding
+    #trg_output_mask = (trg_output_padded != pad_token_id)
     
     return {
         'src': src_padded, 
-        'trg': trg_padded,
+        'trg_input': trg_input_padded,
+        'trg_output': trg_output_padded,
         'src_mask': src_mask, 
-        'trg_mask': trg_mask
+        'trg_input_mask': trg_input_mask,
+        #'trg_output_mask': trg_output_mask
     }
 
 def calculate_batch_size(avg_tokens, target_tokens_per_batch, gradient_accumulation_step):

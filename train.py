@@ -33,7 +33,7 @@ parser.add_argument("--auto_batch_calculate", action=argparse.BooleanOptionalAct
 parser.add_argument("--train_batch_size", type=int, default=32) # Reduced default batch size
 parser.add_argument("--test_batch_size", type=int, default=32)  # Reduced default batch size
 
-parser.add_argument("--gradient_accumulation_steps", type=int, default=8)  # Increased for smaller batches
+parser.add_argument("--gradient_accumulation_steps", type=int, default=5)  # Increased for smaller batches
 parser.add_argument("--mixed_precision", action=argparse.BooleanOptionalAction, default=True)  # Enable by default
 
 parser.add_argument("--lr_warmup", '-lrw', type=int, default=4000)

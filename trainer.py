@@ -93,15 +93,12 @@ class Trainer:
 
             for batch_idx, batch in enumerate(epoch_pbar):
                 source = batch['src'].to(self.device)
-                target = batch['trg'].to(self.device)
+                target_input = batch['trg_input'].to(self.device)
+                target_output = batch['trg_output'].to(self.device)
+
                 src_mask = batch['src_mask'].to(self.device)
-                trg_mask = batch['trg_mask'].to(self.device)
-                
-                # Prepare decoder input (target without last token) and target output (target without first token)
-                decoder_input = target[:, :-1]  # Remove last token for decoder input
-                target_output = target[:, 1:]   # Remove first token for target output
-                trg_input_mask = trg_mask[:, :-1]  # Mask for decoder input
-                trg_output_mask = trg_mask[:, 1:]  # Mask for target output
+                trg_input_mask = batch['trg_input_mask'].to(self.device)
+                #trg_output_mask = batch['trg_output_mask'].to(self.device)
                 
                 # Forward pass with mixed precision if enabled
                 if self.use_mixed_precision:
@@ -112,23 +109,19 @@ class Trainer:
                         autocast_context = torch.autocast(device_type=self.device.type)
                         
                     with autocast_context:
-                        outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
+                        outputs = self.model(source, target_input, src_mask, trg_input_mask)
                         # Reshape for loss calculation
                         outputs = outputs.reshape(-1, outputs.size(-1))
                         target_output = target_output.reshape(-1)
-                        trg_output_mask = trg_output_mask.reshape(-1)
                         
-                        # Only calculate loss for non-padded tokens
                         loss = self.criterion(outputs, target_output)
 
                 else:
-                    outputs = self.model(source, decoder_input, src_mask, trg_input_mask)
+                    outputs = self.model(source, target_input, src_mask, trg_input_mask)
                     # Reshape for loss calculation
                     outputs = outputs.reshape(-1, outputs.size(-1))
                     target_output = target_output.reshape(-1)
-                    trg_output_mask = trg_output_mask.reshape(-1)
-                    
-                    # Only calculate loss for non-padded tokens
+
                     loss = self.criterion(outputs, target_output)
 
                 # Scale loss by accumulation steps
@@ -167,12 +160,12 @@ class Trainer:
                     self.lr_scheduler.step()
                     
                     steps += 1
-                    avg_loss = accumulated_loss / self.gradient_accumulation_step
-                    self.train_loss_list[ep].append(avg_loss)
+                    #avg_loss = accumulated_loss / self.gradient_accumulation_step
+                    self.train_loss_list[ep].append(accumulated_loss)
                     
                     # Update progress bar with gradient info
                     epoch_pbar.set_postfix({
-                        'loss': f'{avg_loss:.4f}',
+                        'loss': f'{accumulated_loss:.4f}',
                         'lr': f'{self.lr_scheduler.get_last_lr()[0]:.6f}',
                         'step': steps
                     })
@@ -216,30 +209,24 @@ class Trainer:
         with torch.no_grad():
             for batch in data_loader:
                 source = batch['src'].to(self.device)
-                target = batch['trg'].to(self.device)
+                target_input = batch['trg_input'].to(self.device)
+                target_output = batch['trg_output'].to(self.device)
+
                 src_mask = batch['src_mask'].to(self.device)
-                trg_mask = batch['trg_mask'].to(self.device)
-                
-                # Prepare decoder input and target output
-                decoder_input = target[:, :-1]
-                target_output = target[:, 1:]
-                trg_input_mask = trg_mask[:, :-1]
-                trg_output_mask = trg_mask[:, 1:]
+                trg_input_mask = batch['trg_input_mask'].to(self.device)
                 
                 # Forward pass
-                outputs = self.model(source, decoder_input, src_mask, trg_input_mask, mode='train')
+                outputs = self.model(source, target_input, src_mask, trg_input_mask, mode='train')
                 
                 # Reshape for loss calculation
                 outputs = outputs.reshape(-1, outputs.size(-1))
                 target_output = target_output.reshape(-1)
-                trg_output_mask = trg_output_mask.reshape(-1)
                 
                 # Calculate loss only for non-padded tokens
                 loss = self.criterion(outputs, target_output)
-                loss = loss * trg_output_mask.float()
                 
                 total_loss += loss.sum().item()
-                total_tokens += trg_output_mask.sum().item()
+                total_tokens += bool(target_output).sum().item()
         
         avg_loss = total_loss / total_tokens if total_tokens > 0 else float('inf')
         print(f"Validation loss: {avg_loss:.4f}")
