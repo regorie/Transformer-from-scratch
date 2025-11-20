@@ -38,13 +38,13 @@ parser.add_argument("--mixed_precision", action=argparse.BooleanOptionalAction, 
 
 parser.add_argument("--lr_warmup", '-lrw', type=int, default=4000)
 parser.add_argument("--dropout", '-drop', type=float, default=0.1)
-parser.add_argument("--label_smoothing", default=0.1)
-parser.add_argument("--test_interval", default=1000)
+parser.add_argument("--label_smoothing", type=float, default=0.1)
+parser.add_argument("--test_interval", type=int, default=1000)
 
 # IO
 parser.add_argument("--output_file", default="./outputs/output")
 parser.add_argument("--checkpoint_dir", default="./checkpoints/")
-parser.add_argument("--max_checkpoint", default=5)
+parser.add_argument("--max_checkpoint", type=int, default=5)
 
 args = parser.parse_args()
 

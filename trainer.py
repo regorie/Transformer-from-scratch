@@ -69,7 +69,7 @@ class Trainer:
 
         self.val_loss_list = []
         self.train_loss_list = []
-        self.checkpoint_files = deque(maxlen=max_checkpoint)
+        self.checkpoint_files = deque(maxlen=max_checkpoint+3)
         
         # Memory optimization settings
         if torch.cuda.is_available():
@@ -151,18 +151,16 @@ class Trainer:
                 
                 # Update weights every gradient_accumulation_step
                 if accumulation_step % self.gradient_accumulation_step == 0:
-                    # Check gradients before clipping
-                    grad_norm = self._compute_grad_norm()
                     
                     if self.use_mixed_precision:
                         # Gradient clipping for mixed precision
                         self.scalar.unscale_(self.optimizer)
-                        clipped_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         self.scalar.step(self.optimizer)
                         self.scalar.update()
                     else:
                         # Gradient clipping for normal training
-                        clipped_grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                         self.optimizer.step()
                     
                     self.optimizer.zero_grad()
@@ -176,7 +174,6 @@ class Trainer:
                     epoch_pbar.set_postfix({
                         'loss': f'{avg_loss:.4f}',
                         'lr': f'{self.lr_scheduler.get_last_lr()[0]:.6f}',
-                        'grad_norm': f'{grad_norm:.3f}',
                         'step': steps
                     })
                     
