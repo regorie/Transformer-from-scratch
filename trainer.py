@@ -3,6 +3,7 @@ import torch
 from tqdm import tqdm
 import os
 from collections import deque
+from dataset import PAD
 
 class LRScheduler:
     """
@@ -226,7 +227,7 @@ class Trainer:
                 loss = self.criterion(outputs, target_output)
                 
                 total_loss += loss.sum().item()
-                total_tokens += bool(target_output).sum().item()
+                total_tokens += (target_output != PAD).sum().item()  # Count non-padding tokens
         
         avg_loss = total_loss / total_tokens if total_tokens > 0 else float('inf')
         print(f"Validation loss: {avg_loss:.4f}")
