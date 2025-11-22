@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
 from layer import *
+from dataset import PAD
 
 class Transformer(nn.Module):
     def __init__(self, n_encoder_layer, n_decoder_layer, embed_size, vocab_size, dropout,
@@ -12,7 +12,7 @@ class Transformer(nn.Module):
 
         #self.src_embed = nn.Embedding(vocab_size, embed_size)
         #self.trg_embed = nn.Embedding(vocab_size, embed_size)
-        self.embed = nn.Embedding(vocab_size, embed_size)
+        self.embed = nn.Embedding(vocab_size, embed_size, padding_idx=PAD)
         self.positional = PositionalEncoding(embed_size, 5000)
 
         self.src_dropout = nn.Dropout(dropout)
@@ -30,18 +30,16 @@ class Transformer(nn.Module):
         # Proper weight initialization
         self._init_weights()
 
-    def forward(self, source, target, src_mask=None, trg_mask=None, mode='train'):
+    def forward(self, source, target, src_mask=None, trg_mask=None, mode='train', temperature=1.0):
         # source shape : (batch_size, src_seq_len)
         # target shape : (batch_size, trg_seq_len)
         # src_mask shape : (batch_size, src_seq_len) - True for real tokens, False for padding
         # trg_mask shape : (batch_size, trg_seq_len) - True for real tokens, False for padding
+        # temperature : float to control output distribution sharpness
         batch_size, _ = source.shape
 
-        # embedding with scaling (as per Transformer paper)
-        #source = self.src_embed(source) * math.sqrt(self.embed_size)
-        #target = self.trg_embed(target) * math.sqrt(self.embed_size)
-        source = self.embed(source) * math.sqrt(self.embed_size)
-        target = self.embed(target) * math.sqrt(self.embed_size)
+        source = self.embed(source) * self.embed_size**0.5
+        target = self.embed(target) * self.embed_size**0.5
 
         # positional encoding
         source = self.positional(source)
@@ -55,22 +53,20 @@ class Transformer(nn.Module):
         decoder_output = self.decoder(target, encoder_output, src_mask, trg_mask)
 
         # linear
-        output = self.out_linear(decoder_output) # (batch_size, trg_seq_len, out_dim)
+        output = self.out_linear(decoder_output)# (batch_size, trg_seq_len, out_dim)
+        
+        if temperature != 1.0:
+            output = output / temperature
         
         return output
 
     def _init_weights(self):
-        """Initialize weights according to the Transformer paper"""
-        # Initialize embeddings with proper scaling
-        #nn.init.normal_(self.src_embed.weight, mean=0, std=self.embed_size ** -0.5)
-        nn.init.normal_(self.embed.weight, mean=0, std=self.embed_size ** -0.5)
-        
-        # Initialize linear layers with Xavier uniform
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0.0)
+        #for name, p in self.named_parameters():
+        #    if p.dim() > 1:
+        #        nn.init.xavier_uniform_(p)
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
     def debug_forward(self, source, target, src_mask=None, trg_mask=None):
         """Debug version of forward pass with intermediate value checking"""
@@ -78,8 +74,8 @@ class Transformer(nn.Module):
         print(f"🔍 Input target range: [{target.min().item():.3f}, {target.max().item():.3f}]")
         
         # embedding with scaling
-        source_emb = self.src_embed(source) * math.sqrt(self.embed_size)
-        target_emb = self.trg_embed(target) * math.sqrt(self.embed_size)
+        source_emb = self.src_embed(source) * self.embed_size**0.5
+        target_emb = self.trg_embed(target) * self.embed_size**0.5
         print(f"🔍 After embedding - source range: [{source_emb.min().item():.3f}, {source_emb.max().item():.3f}]")
         print(f"🔍 After embedding - target range: [{target_emb.min().item():.3f}, {target_emb.max().item():.3f}]")
         

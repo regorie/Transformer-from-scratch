@@ -1,11 +1,11 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
-from tqdm import tqdm
+
 import pickle
 
 from model import Transformer
-from dataset import create_dataloader, load_vocab, PAD, UNK, BOS, EOS
+from dataset import create_dataloader, load_vocab, PAD
 from trainer import Trainer, LRScheduler
 import argparse
 
@@ -14,7 +14,7 @@ parser.add_argument("--source_lang", default='en')
 parser.add_argument("--target_lang", default='de')
 
 # data info and arg
-parser.add_argument("--vocab", default=None) # vocab files can be given explicitly
+parser.add_argument("--vocab", default="./datasets/wmt14_en_de/vocab.json") # vocab files can be given explicitly
 parser.add_argument("--max_length", type=int, default=100) # maximum length of sentences
 
 # args for model
@@ -92,6 +92,7 @@ if __name__=="__main__":
                       use_mixed_precision=args.mixed_precision)
 
     # train
+    #with torch.autograd.detect_anomaly():
     trainer.train(epoch=args.epoch, max_steps=args.max_steps, test_interval=args.test_interval)
     print("Training complete...")
 

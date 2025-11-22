@@ -53,7 +53,8 @@ class TranslationDataset(Dataset):
                 trg_ids = text_to_ids(trg_line, vocab)
                 
                 # STRICT length filtering to prevent memory issues
-                if len(src_ids) <= max_length and len(trg_ids) <= max_length:
+                if len(src_ids) <= max_length and len(trg_ids) <= max_length \
+                    and len(src_ids) > 4 and len(trg_ids) > 4:
                     self.src_sentences.append(src_ids)
                     #self.trg_sentences.append(trg_ids)
                     self.trg_input_sentences.append([BOS]+trg_ids)

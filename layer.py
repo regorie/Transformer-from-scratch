@@ -8,7 +8,7 @@ class EncoderLayer(nn.Module):
         super(EncoderLayer, self).__init__()
         
         self.attention = MultiheadAttention(embed_dim, encoder_args['self_attention'])
-        self.layer_norm1 = LayerNorm(embed_dim)
+        self.layer_norm1 = nn.LayerNorm(embed_dim, eps=1e-6)
         self.dropout1 = nn.Dropout(encoder_args['dropout'])
         
         # Feedforward network
@@ -17,7 +17,7 @@ class EncoderLayer(nn.Module):
             nn.ReLU(),
             nn.Linear(embed_dim * 4, embed_dim)
         )
-        self.layer_norm2 = LayerNorm(embed_dim)
+        self.layer_norm2 = nn.LayerNorm(embed_dim, eps=1e-6)
         self.dropout2 = nn.Dropout(encoder_args['dropout'])
 
     def forward(self, input, mask=None):
@@ -26,16 +26,14 @@ class EncoderLayer(nn.Module):
         # output shape (batch_size, seq_len, embed_dim)
         residual = input.clone()
 
-        # Apply dropout to sub-layer output BEFORE adding residual and normalizing
         output = self.attention(input, input, input, mask, mask)
-        output = self.dropout1(output)  # Dropout BEFORE residual connection
+        output = self.dropout1(output)
         output = self.layer_norm1(output + residual)
 
         residual = output.clone()
 
-        # Apply dropout to sub-layer output BEFORE adding residual and normalizing
         output = self.ffn(output)
-        output = self.dropout2(output)  # Dropout BEFORE residual connection
+        output = self.dropout2(output)
         output = self.layer_norm2(output + residual)
 
         return output
@@ -46,10 +44,10 @@ class DecoderLayer(nn.Module):
         super(DecoderLayer, self).__init__()
 
         self.masked_attention = MultiheadAttention(embed_dim, decoder_args['self_attention'])
-        self.layer_norm1 = LayerNorm(embed_dim)
+        self.layer_norm1 = nn.LayerNorm(embed_dim,eps=1e-6)
         self.dropout1 = nn.Dropout(decoder_args['dropout'])
         self.attention = MultiheadAttention(embed_dim, decoder_args['attention'])
-        self.layer_norm2 = LayerNorm(embed_dim)
+        self.layer_norm2 = nn.LayerNorm(embed_dim, eps=1e-6)
         self.dropout2 = nn.Dropout(decoder_args['dropout'])
         
         # Feedforward network
@@ -58,7 +56,7 @@ class DecoderLayer(nn.Module):
             nn.ReLU(),
             nn.Linear(embed_dim * 4, embed_dim)
         )
-        self.layer_norm3 = LayerNorm(embed_dim)
+        self.layer_norm3 = nn.LayerNorm(embed_dim, eps=1e-6)
         self.dropout3 = nn.Dropout(decoder_args['dropout'])
 
     def forward(self, input, encoder_output, src_mask=None, trg_mask=None):
@@ -68,21 +66,18 @@ class DecoderLayer(nn.Module):
         # trg_mask shape (batch_size, trg_seq_len) - decoder padding mask
 
         residual = input.clone()
-        # Apply dropout to sub-layer output BEFORE adding residual and normalizing
-        self_attention = self.masked_attention(input, input, input, trg_mask, trg_mask, masked=True)
-        self_attention = self.dropout1(self_attention)  # Dropout BEFORE residual connection
+        self_attention = self.masked_attention(input, input, input, trg_mask, trg_mask, masked=False)
+        self_attention = self.dropout1(self_attention)
         self_attention = self.layer_norm1(self_attention + residual)
 
         residual = self_attention.clone()
-        # Apply dropout to sub-layer output BEFORE adding residual and normalizing
         output = self.attention(self_attention, encoder_output, encoder_output, None, src_mask)
-        output = self.dropout2(output)  # Dropout BEFORE residual connection
+        output = self.dropout2(output)
         output = self.layer_norm2(output + residual)
 
         residual = output.clone()
-        # Apply dropout to sub-layer output BEFORE adding residual and normalizing
         output = self.ffn(output)
-        output = self.dropout3(output)  # Dropout BEFORE residual connection
+        output = self.dropout3(output)
         output = self.layer_norm3(output + residual)
 
         return output
@@ -97,7 +92,7 @@ class PositionalEncoding(nn.Module):
 
         encoding = torch.zeros(max_len, embed_dim)
         encoding[:, 0::2] = torch.sin(pos / (10000 ** (_2i / embed_dim)))
-        encoding[:, 1::2] = torch.cos(pos / (10000 ** (_2i / embed_dim)))  # FIXED: removed [:embed_dim//2]
+        encoding[:, 1::2] = torch.cos(pos / (10000 ** (_2i / embed_dim)))
         
         self.register_buffer('pos_encoding', encoding)
 
@@ -107,22 +102,6 @@ class PositionalEncoding(nn.Module):
         # pos_encoding is automatically on the same device as x due to register_buffer
         return x + self.pos_encoding[:seq_len, :].unsqueeze(0)
 
-class LayerNorm(nn.Module):
-    def __init__(self, embed_dim, eps=1e-12):
-        super(LayerNorm, self).__init__()
-
-        self.gamma = nn.Parameter(torch.ones(embed_dim))
-        self.beta = nn.Parameter(torch.zeros(embed_dim))
-        self.eps = eps
-
-    def forward(self, x):
-        # shape (batch_size, seq_len, embed_dim)
-        mean = x.mean(-1, keepdim=True)
-        var = x.var(-1, unbiased=False, keepdim=True)
-
-        out = (x - mean) / torch.sqrt(var + self.eps)
-        out = self.gamma * out + self.beta
-        return out
 
 class MultiheadAttention(nn.Module):
     def __init__(self, embed_dim, args):
@@ -147,7 +126,7 @@ class MultiheadAttention(nn.Module):
         # query shape : (batch_size, q_seq_len, embed_dim)
         # key, value shape : (batch_size, seq_len, embed_dim)
         # q_padding_mask shape : (batch_size, q_seq_len) = True for real tokens, False for padding
-        # v_padding_mask shape : (batch_size, sseq_len) = True for real tokens, False for padding
+        # v_padding_mask shape : (batch_size, seq_len) = True for real tokens, False for padding
         # output (batch_size, q_seq_len, embed_dim)
 
         batch_size, q_seq_len, embed_dim = query.shape
@@ -168,31 +147,30 @@ class MultiheadAttention(nn.Module):
         value = value.transpose(1, 2)  # (batch_size, n_head, seq_len, d_v)
         
         # Compute attention scores
-        attention = torch.matmul(query, key.transpose(-2, -1)) # (batch_size, n_head, q_seq_len, seq_len)
-        # Scale
-        attention /= math.sqrt(self.d_k)
-
+        attention = torch.matmul(query, key.transpose(2, 3)) / math.sqrt(self.d_k) # (batch_size, n_head, q_seq_len, seq_len)
+        #if torch.isinf(attention).any():
+        #    print("inf value in attention score before masking")
         # Apply causal mask for decoder self-attention (before padding mask)
         if masked:
             causal_mask = torch.triu(torch.ones(q_seq_len, seq_len, device=attention.device), diagonal=1).bool()
             attention = attention.masked_fill(causal_mask, float('-inf'))
+        #if torch.isinf(attention).any():
+        #    print("inf value in attention score after causal masking")
 
         # Apply padding mask
         if v_padding_mask is not None:
-            # Convert padding mask to attention mask format
             # v_padding_mask: (batch_size, seq_len) -> (batch_size, 1, 1, seq_len)
             mask = v_padding_mask.unsqueeze(1).unsqueeze(1)
             attention = attention.masked_fill(~mask, float('-inf'))
-        
-        if q_padding_mask is not None:
-            # q_padding_mask: (batch_size, q_seq_len) -> (batch_size, 1, q_seq_len, 1)
-            mask = q_padding_mask.unsqueeze(1).unsqueeze(-1)
-            attention = attention.masked_fill(~mask, float('-inf'))
 
         # Softmax
+        #if attention.max() > 50:
+        #    print("attention scores too high")
+        #if torch.isinf(attention).any():
+        #    print("inf value in attention score before softmax")
         attention = F.softmax(attention, dim=-1)
-        # replace NaN with 0
-        attention = torch.where(torch.isnan(attention), torch.zeros_like(attention), attention)
+        #if torch.isnan(attention).any():
+        #    print("nan values after softmax")
 
         self.attention = attention
 

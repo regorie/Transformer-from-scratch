@@ -4,6 +4,7 @@ from tqdm import tqdm
 import os
 from collections import deque
 from dataset import PAD
+import pickle
 
 class LRScheduler:
     """
@@ -111,8 +112,15 @@ class Trainer:
                         
                     with autocast_context:
                         outputs = self.model(source, target_input, src_mask, trg_input_mask)
+                        #with open(f'./outputs/logits_{accumulation_step}.pkl', 'wb') as f:
+                        #    pickle.dump(outputs, f)
+                        #if accumulation_step % self.gradient_accumulation_step == 0:
+                        #    max_args = torch.argmax(outputs, dim=-1)
+                        #    with open(f'./outputs/max_args_{accumulation_step}.pkl', 'wb') as f:
+                        #        pickle.dump(max_args, f)
                         # Reshape for loss calculation
                         outputs = outputs.reshape(-1, outputs.size(-1))
+                        #print(outputs.max())
                         target_output = target_output.reshape(-1)
                         
                         loss = self.criterion(outputs, target_output)
@@ -127,12 +135,6 @@ class Trainer:
 
                 # Scale loss by accumulation steps
                 loss = loss / self.gradient_accumulation_step
-                
-                # Check for NaN loss
-                if torch.isnan(loss) or torch.isinf(loss):
-                    print(f"Warning: NaN/Inf loss detected at step {steps}, skipping batch")
-                    continue
-                    
                 accumulated_loss += loss.item()
                 
                 # Backward pass
@@ -227,9 +229,8 @@ class Trainer:
                 loss = self.criterion(outputs, target_output)
                 
                 total_loss += loss.sum().item()
-                total_tokens += (target_output != PAD).sum().item()  # Count non-padding tokens
         
-        avg_loss = total_loss / total_tokens if total_tokens > 0 else float('inf')
+        avg_loss = total_loss / len(data_loader) if len(data_loader) > 0 else float('inf')
         print(f"Validation loss: {avg_loss:.4f}")
         
         return avg_loss
@@ -262,7 +263,8 @@ class Trainer:
         
         checkpoint_path = os.path.join(self.checkpoint_dir, f'checkpoint_step_{step}.pt')
         torch.save(checkpoint, checkpoint_path)
-        self.checkpoint_files.append(checkpoint_path)
+        if step not in [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 55000, 60000, 65000,70000,75000,80000,85000,90000,95000]:
+            self.checkpoint_files.append(checkpoint_path)
         
         # Remove old checkpoints if we exceed max_checkpoint
         while len(self.checkpoint_files) > self.max_checkpoint:
