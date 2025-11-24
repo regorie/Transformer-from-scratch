@@ -66,7 +66,7 @@ class DecoderLayer(nn.Module):
         # trg_mask shape (batch_size, trg_seq_len) - decoder padding mask
 
         residual = input.clone()
-        self_attention = self.masked_attention(input, input, input, trg_mask, trg_mask, masked=False)
+        self_attention = self.masked_attention(input, input, input, trg_mask, trg_mask, masked=True)
         self_attention = self.dropout1(self_attention)
         self_attention = self.layer_norm1(self_attention + residual)
 
