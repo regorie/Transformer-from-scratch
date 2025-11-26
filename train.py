@@ -17,17 +17,17 @@ parser.add_argument("--target_lang", default='de')
 parser.add_argument("--vocab", default="./datasets/wmt14_en_de/vocab.json") # vocab files can be given explicitly
 parser.add_argument("--max_length", type=int, default=100) # maximum length of sentences
 
-# args for model
-parser.add_argument("--encoder_layers", type=int, default=6)
-parser.add_argument("--decoder_layers", type=int, default=6)
-parser.add_argument("--embed_dim", type=int, default=512)
-parser.add_argument("--n_head", type=int, default=8)
+# args for model                                             # big model args
+parser.add_argument("--encoder_layers", type=int, default=6) # 6
+parser.add_argument("--decoder_layers", type=int, default=6) # 6
+parser.add_argument("--embed_dim", type=int, default=512)    # 1024
+parser.add_argument("--n_head", type=int, default=8)         # 16
 parser.add_argument("--d_k", type=int, default=64)
 parser.add_argument("--d_v", type=int, default=64)
 
 # args for training loop
-parser.add_argument("--epoch", '-ep', type=int, default=300)
-parser.add_argument("--max_steps", '-ms', type=int, default=100000) # max_steps are primary
+parser.add_argument("--epoch", '-ep', type=int, default=10000)
+parser.add_argument("--max_steps", '-ms', type=int, default=100000) # 300000  max_steps are primary 
 parser.add_argument("--batch_token", '-b', type=int, default=25000)  # Reduced for memory safety
 parser.add_argument("--auto_batch_calculate", action=argparse.BooleanOptionalAction, default=True)
 parser.add_argument("--train_batch_size", type=int, default=32) # Reduced default batch size
@@ -37,14 +37,14 @@ parser.add_argument("--gradient_accumulation_steps", type=int, default=5)  # Inc
 parser.add_argument("--mixed_precision", action=argparse.BooleanOptionalAction, default=True)  # Enable by default
 
 parser.add_argument("--lr_warmup", '-lrw', type=int, default=4000)
-parser.add_argument("--dropout", '-drop', type=float, default=0.1)
+parser.add_argument("--dropout", '-drop', type=float, default=0.1) # 0.3
 parser.add_argument("--label_smoothing", type=float, default=0.1)
 parser.add_argument("--test_interval", type=int, default=1000)
 
 # IO
 parser.add_argument("--output_file", default="./outputs/output")
 parser.add_argument("--checkpoint_dir", default="./checkpoints/")
-parser.add_argument("--max_checkpoint", type=int, default=5)
+parser.add_argument("--max_checkpoint", type=int, default=5)       # 20
 
 args = parser.parse_args()
 

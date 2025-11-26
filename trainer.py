@@ -263,8 +263,8 @@ class Trainer:
         
         checkpoint_path = os.path.join(self.checkpoint_dir, f'checkpoint_step_{step}.pt')
         torch.save(checkpoint, checkpoint_path)
-        if step not in [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 55000, 60000, 65000,70000,75000,80000,85000,90000,95000]:
-            self.checkpoint_files.append(checkpoint_path)
+        #if step not in [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000, 55000, 60000, 65000,70000,75000,80000,85000,90000,95000]:
+        self.checkpoint_files.append(checkpoint_path)
         
         # Remove old checkpoints if we exceed max_checkpoint
         while len(self.checkpoint_files) > self.max_checkpoint:

@@ -136,7 +136,7 @@ class BeamSearchDecoder:
         
         # Initialize beam with BOS token
         # Each beam: (sequence, log_prob, finished)
-        beams = [([10911], 0.0, False)]
+        beams = [([BOS], 0.0, False)]
         finished_beams = []
         
         for step in range(self.max_length):
@@ -194,7 +194,7 @@ class BeamSearchDecoder:
             logits = torch.stack(logits)  # [num_active_beams, vocab_size]
             
             # Apply temperature scaling and vocabulary bias correction
-            #logits = logits / self.temperature  # Temperature scaling
+            logits = logits / self.temperature  # Temperature scaling
             #logits = logits - self.vocab_bias.unsqueeze(0)  # Subtract bias (penalty)
             
             # Convert to probabilities
